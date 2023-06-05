@@ -1,0 +1,147 @@
+# https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/
+apiVersion: v1
+kind: Pod
+metadata: # https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/object-meta/#ObjectMeta
+  name: mypod # Уникальное имя в нэймспейсе. Не может быть обновлено. Необходимо, если нет generated-name
+  # generateName: generated-name-       # Используется только при kubectl create, не при apply. Работает если не установлен name
+  namespace: mytest # DNS_LABES. Не может быть обновлено
+  labels: # Метки в формате мапы key/value для организации и категоризации (охвата и выбора) объектов. Может совпадать с селекторами контроллеров репликации и служб.
+    # https://kubernetes.io/docs/reference/labels-annotations-taints/
+    # https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/#labels
+    tier: frontend
+    release: stable
+    env: dev
+    app: nginx
+  annotations: # Аннотации прикрепления произвольных неидентифицирующих метаданных к объектам в формате мапы key/value. может быть установлена внешними инструментами для хранения и получения произвольных метаданных. Они не доступны для запросов и должны сохраняться при изменении объектов.
+    is-logged: "true"
+spec: # https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#PodSpec
+  containers: # https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#Container
+  - name: my-container-in-pod-1
+    image: nginx:latest
+    imagePullPolicy: IfNotPresent # Always/Never/IfNotPresent. Defaults to Always if :latest tag is specified, or IfNotPresent otherwise. Cannot be updated.
+    command: # Если нет - используется ENTRYPOINT. Не выполняется без шелла.
+    - "sh"
+    - "-c"
+    - "sleep 5;echo $(KUBERNETES_PORT); env"
+    args:
+    # Если нет - используется CMD.
+    - "printenv"
+    workingDir: "/"
+    ports: # Patch strategy: merge on key containerPort
+    - containerPort: 80
+      name: www-http # Синонимы - www/http/www-http. If specified, this must be an IANA_SVC_NAME and unique within the pod. Each named port in a pod must have a unique name. Name for the port that can be referred to by services.
+      # hostIP: 0.0.0.0
+      # hostPort: 80 #  If HostNetwork is specified, this must match ContainerPort
+      protocol: TCP # TCP/UDP/SCTP
+    env: # Patch strategy: merge on key name
+    - name: k8s-port
+      value: "$(KUBERNETES_PORT)"
+    - name: myenv
+      valueFrom: # Cannot be used if value is not empty.
+        configMapKeyRef:
+          key: ca.crt
+          name: kube-root-ca.crt
+          optional: false
+    - name: mysecret
+      valueFrom: # Cannot be used if value is not empty.
+        secretKeyRef: # secret in pod's namespace
+          key: mysecretkey
+          name: mysecretname
+          optional: true # не обязательно должено быть опеределено
+    - name: mynode
+      valueFrom:
+        fieldRef: # https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/object-field-selector/#ObjectFieldSelector
+          #  metadata.name, metadata.namespace, metadata.labels['\<KEY>'], metadata.annotations['\<KEY>'], spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs
+          fieldPath: spec.nodeName
+          apiVersion: v1
+    - name: myres
+      valueFrom:
+        resourceFieldRef: # https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/resource-field-selector/#ResourceFieldSelector
+          # limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage
+          resource: limits.memory
+          containerName: my-container-in-pod-1
+          divisor: 1Mi
+    envFrom:
+    - configMapRef:
+        name: cm-not-exists
+        optional: true # Не обязательно ConfigMap должен быть опеределен
+      prefix: MY- # добавляем к каждому ключу из конфигмапы
+    - secretRef:
+        name: secret-not-exists
+        optional: true # Не обязательно ConfigMap должен быть опеределен
+      prefix: MYSECRET- # добавляем к каждому ключу из конфигмапы
+    # volumeMounts: # Patch strategy: merge on key mountPath
+    # # https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#volumes-1
+    # - mountPath: /mnt/myvol
+    #   name: myvol
+    #   mountPropagation: None # https://kubernetes.io/docs/concepts/storage/volumes/#mount-propagation
+    #   # None - default. Это монтирование тома не будет принимать никаких последующих монтирований, которые монтируются к этому тому или любому из его подкаталогов хостом. Аналогично, никакие монтирования, созданные контейнером, не будут видны на хосте.
+    #   # HostToContainer. Это монтирование тома будет получать все последующие монтирования, которые монтируются к этому тому или любому из его подкаталогов.
+    #   # Bidirectional - опасно. Это монтирование тома ведет себя так же, как и монтирование HostToContainer. Кроме того, все монтирования тома, созданные контейнером, будут передаваться обратно на хост и во все контейнеры всех подсистем, которые используют тот же том.
+    #   readOnly: true
+    #   subPath: mydir # используем /mnt/myvol/mydir либо subPathExpr
+    #   # subPathExpr: $(HOSTNAME) # либо прямое указание на subPath
+    # volumeDevices: # Patch strategy: merge on key devicePath
+    # - devicePath: /mnt/pv
+    #   name: pvc-name # совпадает с persistentVolumeClaim
+    resources: # https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#resources
+      # claims: #  alpha field and requires enabling the DynamicResourceAllocation feature
+      #   name: myrc-name
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    # resizePolicy: # FEATURE STATE: Kubernetes v1.27 [alpha]
+    # # Atomic: will be replaced during a merge
+    #   resourceName: cpu # cpu/memory
+    #   restartPolicy: NotRequired # NotRequired - default. RestartContainer - рестартуем при ресайзе ресурса
+    lifecycle: #
+      postStart: # сразу после создания. если не выполнится - контейнер рестартует
+        # https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#LifecycleHandler
+        exec:
+          command:
+          - "sh"
+          - "-c"
+          - "echo START > /tmp/date.txt"
+      # postStart: # сразу после создания. если не выполнится - контейнер рестартует
+      #   tcpSocket : # !!! DEPRECATED
+      preStop: # https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#LifecycleHandler
+        # called immediately before a container is terminated due to an API request or management event such as liveness/startup probe failure, preemption, resource contention, etc. The handler is not called if the container crashes or exits
+        httpGet:
+          port: 80 # IANA_SVC_NAME
+          host: localhost # Host name to connect to, defaults to the pod IP. You probably want to set "Host" in httpHeaders instead.
+          httpHeaders:
+          - name: X-My-Header
+            value: myvalue
+          path: /health
+          scheme: HTTP # HTTP/HTTPS
+    terminationMessagePolicy: File # File - default Укажите, как должно быть заполнено сообщение о завершении.
+    # File будет использовать содержимое пути terminationMessagePath для заполнения сообщения о состоянии контейнера как при успехе, так и при неудаче.
+    # FallbackToLogsOnError будет использовать последний фрагмент журнала контейнера
+    terminationMessagePath: /var/log/pod.termination.message # Defaults to /dev/termination-log. Optional: Path at which the file to which the container's termination message will be written is mounted into the container's filesystem. Cannot be updated.
+    livenessProbe: # exec/grpc/httpGet/tcpSocket Container will be restarted if the probe fails.
+      exec:
+        command:
+        - cat
+        - /tmp/healthy
+      initialDelaySeconds: 5
+      periodSeconds: 5
+    readinessProbe: # exec/grpc/httpGet/tcpSocket Indicates whether the container is ready to respond to requests. If the readiness probe fails, the endpoints controller removes the Pod's IP address from the endpoints of all Services that match the Pod. The default state of readiness before the initial delay is Failure. If a container does not provide a readiness probe, the default state is Success.
+      httpGet:
+        path: /health
+        port: 8080
+        httpHeaders:
+        - name: X-Custom-Header
+          value: myheader
+      initialDelaySeconds: 5
+      periodSeconds: 5
+    startupProbe: # exec/grpc/httpGet/tcpSocket Indicates whether the application within the container is started. All other probes are disabled if a startup probe is provided, until it succeeds. If the startup probe fails, the kubelet kills the container, and the container is subjected to its restart policy. If a container does not provide a startup probe, the default state is Success.
+      tcpSocket:
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+
+## https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#NodeAffinity
